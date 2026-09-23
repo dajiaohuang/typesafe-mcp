@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.5](https://github.com/itsmostafa/typesafe-mcp/compare/v0.4.4...v0.4.5) (2026-09-23)
+
+
+### Bug Fixes
+
+* **setup:** point skipped-client messages at the configuration docs ([84ad7f7](https://github.com/itsmostafa/typesafe-mcp/commit/84ad7f76ef3d56395724fc04569c6448e7b61c49))
+
 ## [0.4.4](https://github.com/itsmostafa/typesafe-mcp/compare/v0.4.3...v0.4.4) (2026-09-23)
 
 
