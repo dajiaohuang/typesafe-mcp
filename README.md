@@ -1,14 +1,17 @@
 # System One Connector
 
-**Give your AI agent answers it can act on: typed judgments with real probabilities, instead of prose it has to parse.**
+[![Latest release](https://img.shields.io/github/v/release/itsmostafa/system-one-connector?sort=semver)](https://github.com/itsmostafa/system-one-connector/releases/latest)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+![Go version](https://img.shields.io/github/go-mod/go-version/itsmostafa/system-one-connector)
+[![GitHub stars](https://img.shields.io/github/stars/itsmostafa/system-one-connector?style=flat)](https://github.com/itsmostafa/system-one-connector/stargazers)
+
+<img src="assets/img/system-one-logo.gif" alt="System One Connector logo" width="75%">
+
+**Give your AI agent direct access to models like Jev, CLM, and Laya: quick decisions with real probabilities.**
 
 `evaluate` connects Claude Code, Claude Desktop, Codex, Hermes and [pi](https://pi.dev) to [TypeSafe](https://typesafe.ai)'s Jev model. Your agent asks a question like "is this urgent?" or "which team owns this?" and gets back a number or an option it can use in an `if` statement.
 
 Not tied to one provider: the same connector also runs open System One models you host yourself, such as [CLM](https://huggingface.co/Contrastive-LM/CLM-v0.1-8B) and Laya. See [running CLM locally](docs/configuration.md#running-clm-locally).
-
-[![Latest release](https://img.shields.io/github/v/release/itsmostafa/system-one-connector?sort=semver)](https://github.com/itsmostafa/system-one-connector/releases/latest)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Go version](https://img.shields.io/github/go-mod/go-version/itsmostafa/system-one-connector)
 
 ```
   "Help! My payouts have been          ┌──────────┐        is_urgent   0.95
