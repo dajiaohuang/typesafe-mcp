@@ -160,6 +160,23 @@ func TestRoute(t *testing.T) {
 		}
 	}
 
+	// TYPESAFE_MAX_ITEMS lowers the item cap on either route; a bad value fails
+	// here rather than being baked into client configs.
+	t.Setenv("TYPESAFE_BASE_URL", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "o")
+	t.Setenv("TYPESAFE_MAX_ITEMS", "50")
+	if c, err := route(); err != nil || c.MaxItems != 50 {
+		t.Errorf("TYPESAFE_MAX_ITEMS=50: got %+v, %v", c, err)
+	}
+	for _, v := range []string{"0", fmt.Sprint(maxItems + 1), "ten"} {
+		t.Setenv("TYPESAFE_MAX_ITEMS", v)
+		if _, err := route(); err == nil {
+			t.Errorf("TYPESAFE_MAX_ITEMS=%q: want error", v)
+		}
+	}
+	t.Setenv("TYPESAFE_MAX_ITEMS", "")
+
 	// No keys at all: route fails before it ever looks at the base.
 	t.Setenv("TYPESAFE_API_KEY", "")
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -832,13 +849,32 @@ func TestItemsAtLimit(t *testing.T) {
 	}
 }
 
+// A configured cap rejects the batch before any request goes out.
+func TestItemsConfiguredLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("request sent past the cap")
+	}))
+	defer srv.Close()
+	call := connectClient(t, &Client{URL: srv.URL, HTTP: srv.Client(), MaxItems: 2})
+	text, isErr := call(`{"questions":{"q":{"type":"noul","instructions":"i"}},"items":{"a":{},"b":{},"c":{}}}`)
+	if !isErr || !strings.Contains(text, "exceeds the limit of 2") {
+		t.Errorf("IsError=%v, text=%q", isErr, text)
+	}
+}
+
 // connectEvaluate registers the evaluate tool against srv and connects an MCP
 // client to it in memory, returning a call that yields the tool's text and
 // whether it was an error result.
 func connectEvaluate(t *testing.T, srv *httptest.Server) func(args string) (string, bool) {
 	t.Helper()
+	return connectClient(t, &Client{URL: srv.URL, APIKey: "k", HTTP: srv.Client(), Model: "m"})
+}
+
+// connectClient is connectEvaluate for a caller-built Client.
+func connectClient(t *testing.T, c *Client) func(args string) (string, bool) {
+	t.Helper()
 	s := mcp.NewServer(&mcp.Implementation{Name: "evaluate", Version: "test"}, nil)
-	registerTools(s, &Client{URL: srv.URL, APIKey: "k", HTTP: srv.Client(), Model: "m"})
+	registerTools(s, c)
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
 	ss, err := s.Connect(ctx, st, nil)
