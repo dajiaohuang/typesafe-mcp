@@ -75,6 +75,18 @@ TYPESAFE_API_KEY=local TYPESAFE_BASE_URL=http://127.0.0.1:8700 TYPESAFE_MODEL=cl
 - Use the real key instead of `local` if you started `clm-serve` with `CLM_API_KEY`.
 - CLM embeds state as prose and truncates it past 2048 tokens by default. The tool's guidance is written for Jev, so backticked field paths and the latency figures may not carry over to CLM.
 
+### d1 (Liquid AI)
+
+[Liquid AI](https://liquid.ai) hosts d1, a System One model, at `https://api.liquid.ai/decisions/v1/systemone`. Since that already ends in `/v1/systemone`, it works through the same custom host route as a self-run server — just point `TYPESAFE_BASE_URL` at Liquid AI's host instead of `127.0.0.1`:
+
+```sh
+TYPESAFE_API_KEY=your-liquid-key TYPESAFE_BASE_URL=https://api.liquid.ai/decisions TYPESAFE_MODEL=d1:free evaluate setup mcp
+```
+
+- `TYPESAFE_API_KEY` just selects this route; use your Liquid AI API key as its value, whatever Liquid AI itself calls that key.
+- `TYPESAFE_MODEL` replaces the default `jev-latest`; without it, every call must pass `model: "d1:free"`.
+- As with CLM, the tool's guidance is written for Jev and may not describe d1's behavior exactly.
+
 ## `evaluate setup mcp`
 
 ```sh
