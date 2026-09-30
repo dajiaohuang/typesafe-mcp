@@ -75,6 +75,14 @@ TYPESAFE_API_KEY=local TYPESAFE_BASE_URL=http://127.0.0.1:8700 TYPESAFE_MODEL=cl
 - Use the real key instead of `local` if you started `clm-serve` with `CLM_API_KEY`.
 - CLM embeds state as prose and truncates it past 2048 tokens by default. The tool's guidance is written for Jev, so backticked field paths and the latency figures may not carry over to CLM.
 
+### Capping items per call
+
+Each item in a call is a separate billed request, up to 500 per call, and some MCP hosts run read-only tools such as `evaluate` without asking. `TYPESAFE_MAX_ITEMS` lowers that cap on either route; it must be a whole number from 1 to 500. It limits one call, not total spend: an agent can still split a batch across calls, so use your provider's spending limits for a hard ceiling.
+
+```sh
+TYPESAFE_API_KEY=your-key TYPESAFE_MAX_ITEMS=50 evaluate setup mcp
+```
+
 ## `evaluate setup mcp`
 
 ```sh
@@ -112,7 +120,7 @@ To use any other MCP client, point it at:
 /absolute/path/to/evaluate mcp
 ```
 
-Put `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in the server's `env`. Add `TYPESAFE_BASE_URL` if you use a custom host, and `TYPESAFE_MODEL` if that host serves a model other than `jev-latest`. For example:
+Put `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in the server's `env`. Add `TYPESAFE_BASE_URL` if you use a custom host, `TYPESAFE_MODEL` if that host serves a model other than `jev-latest`, and `TYPESAFE_MAX_ITEMS` to [cap items per call](#capping-items-per-call). For example:
 
 ```json
 {

@@ -79,11 +79,12 @@ Score answers are 0-indexed: N levels score from `0` to `N-1`. So `3.87` over 5 
 `items` has no counterpart in the TypeSafe API. It lets one tool call ask the same questions about many records:
 
 - The tool sends one request per item, with state `{"item": <record>, "context": <state>}`. `context` is included only when `state` is set.
-- A call accepts at most 500 items, and at most 8 requests run at once. They all come back in one response.
+- A call accepts at most 500 items, or fewer if `TYPESAFE_MAX_ITEMS` is set (see [configuration](configuration.md#capping-items-per-call)). At most 8 requests run at once. They all come back in one response.
 - The result is `{"results": {id: response}, "errors": {id: message}, "meta": {...}}`. `errors` is always present, empty when every item succeeded.
 - `meta` reports the call once: `model`, `input_tokens` and `output_tokens` summed over the items that succeeded, `item_count` (items sent), and `latency_ms` (wall clock for the whole call). Each item response leaves out its own `model` and `usage`; set `include_item_usage: true` to keep them.
 - If one item fails, it appears in `errors` and the other items still complete. The tool call itself fails only when every item fails.
 - All responses in a batch together must stay under 16 MiB. Once that limit is reached, the remaining results are dropped and appear in `errors`. Split large batches across several calls.
+- The result grows with every item and can be far larger than an agent's context window, even under the 16 MiB limit.
 
 Every item is a separately billed request.
 
