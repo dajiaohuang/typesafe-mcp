@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.8](https://github.com/itsmostafa/system-one-connector/compare/v0.4.7...v0.4.8) (2026-09-30)
+
+
+### Features
+
+* **tools:** let TYPESAFE_MAX_ITEMS lower the per-call items cap ([250f62c](https://github.com/itsmostafa/system-one-connector/commit/250f62c021be02cb63e46467a05ccac19450f5d5))
+* **tools:** let TYPESAFE_MAX_ITEMS lower the per-call items cap ([1e88da8](https://github.com/itsmostafa/system-one-connector/commit/1e88da87b8729dcfa1389c3c160c948afd6188cd)), closes [#38](https://github.com/itsmostafa/system-one-connector/issues/38)
+
 ## [0.4.7](https://github.com/itsmostafa/system-one-connector/compare/v0.4.6...v0.4.7) (2026-09-25)
 
 
