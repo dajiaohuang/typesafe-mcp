@@ -84,7 +84,7 @@ Score answers are 0-indexed: N levels score from `0` to `N-1`. So `3.87` over 5 
 - `meta` reports the call once: `model`, `input_tokens` and `output_tokens` summed over the items that succeeded, `item_count` (items sent), and `latency_ms` (wall clock for the whole call). Each item response leaves out its own `model` and `usage`; set `include_item_usage: true` to keep them.
 - If one item fails, it appears in `errors` and the other items still complete. The tool call itself fails only when every item fails.
 - All responses in a batch together must stay under 16 MiB. Once that limit is reached, the remaining results are dropped and appear in `errors`. Split large batches across several calls.
-- The result grows with every item and can be far larger than an agent's context window, even under the 16 MiB limit.
+- The whole result goes back to the agent, so size a batch to what its context window can hold. An item response to a few questions is a few hundred bytes, so 500 items return roughly 100–300 KB, which is tens of thousands of tokens.
 
 Every item is a separately billed request.
 

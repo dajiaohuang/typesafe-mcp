@@ -77,7 +77,11 @@ TYPESAFE_API_KEY=local TYPESAFE_BASE_URL=http://127.0.0.1:8700 TYPESAFE_MODEL=cl
 
 ### Capping items per call
 
-Each item in a call is a separate billed request, up to 500 per call, and some MCP hosts run read-only tools such as `evaluate` without asking. `TYPESAFE_MAX_ITEMS` lowers that cap on either route; it must be a whole number from 1 to 500. It limits one call, not total spend: an agent can still split a batch across calls, so use your provider's spending limits for a hard ceiling.
+`TYPESAFE_MAX_ITEMS` lowers how many items one `evaluate` call accepts. The default and the maximum are both 500; set any whole number from 1 to 500. For example, with `TYPESAFE_MAX_ITEMS=50`, a call with 80 items fails before anything is sent, and a call with 50 items runs as usual.
+
+Why cap it: every item is sent as its own billed request, so one 500-item call costs 500 requests. `evaluate` is marked read-only because it changes nothing, and some MCP hosts run read-only tools without asking you first.
+
+The cap applies on both the TypeSafe and OpenRouter routes. It limits each call, not your total spend: an agent that hits the cap can split the batch across several calls. For a hard ceiling, set a spending limit on your provider account, if the provider offers one.
 
 ```sh
 TYPESAFE_API_KEY=your-key TYPESAFE_MAX_ITEMS=50 evaluate setup mcp
