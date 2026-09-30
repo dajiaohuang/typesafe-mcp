@@ -73,7 +73,6 @@ TYPESAFE_API_KEY=local TYPESAFE_BASE_URL=http://127.0.0.1:8700 TYPESAFE_MODEL=cl
 
 - `TYPESAFE_MODEL` replaces the default `jev-latest` on the TypeSafe route. CLM rejects unknown model names, so without it every call must pass `model: "clm-latest"`. It has no effect on the OpenRouter route, and a `model` passed in a tool call still wins.
 - Use the real key instead of `local` if you started `clm-serve` with `CLM_API_KEY`.
-- CLM embeds state as prose and truncates it past 2048 tokens by default. The tool's guidance is written for Jev, so backticked field paths and the latency figures may not carry over to CLM.
 
 ### d1 (Liquid AI)
 
