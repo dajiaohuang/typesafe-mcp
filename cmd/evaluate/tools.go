@@ -58,7 +58,7 @@ const abstain = "__uncertain__"
 type evaluateIn struct {
 	State     any                 `json:"state,omitempty" jsonschema:"content to judge: plain text, or a JSON object/array with named fields — observed evidence and background as named fields, not your verdict about it; optional with items, where it is sent to every item as context"`
 	Questions map[string]question `json:"questions" jsonschema:"map of question id to question; answers come back under the same ids, which are not sent to the model"`
-	Items     map[string]any      `json:"items,omitempty" jsonschema:"optional map of item id to that item's state; asks the same questions of each item in its own request, so items are judged independently and cannot see each other; at most 500 items per call. Each request's state is {\"item\": <the item>} plus {\"context\": state} when state is set, so instructions reference fields like item.subject and context.user_goals. The result is {\"results\": {id: response}, \"errors\": {id: message}, \"meta\": {model, input_tokens, output_tokens, item_count, latency_ms}}, where meta totals usage over the call and each response omits its own model and usage unless include_item_usage is set; item ids are not sent to the model"`
+	Items     map[string]any      `json:"items,omitempty" jsonschema:"optional map of item id to that item's state; asks the same questions of each item in its own request, so items are judged independently and cannot see each other; at most 500 items per call, or fewer if the server sets a lower cap. Each request's state is {\"item\": <the item>} plus {\"context\": state} when state is set, so instructions reference fields like item.subject and context.user_goals. The result is {\"results\": {id: response}, \"errors\": {id: message}, \"meta\": {model, input_tokens, output_tokens, item_count, latency_ms}}, where meta totals usage over the call and each response omits its own model and usage unless include_item_usage is set; item ids are not sent to the model. The result grows with every item and can exceed your context window, so size batches to what you can read"`
 	Model     string              `json:"model,omitempty" jsonschema:"model to use; defaults to the latest Jev on whichever endpoint is configured; on the TypeSafe route, TYPESAFE_MODEL replaces that default when set"`
 
 	IncludeItemUsage bool `json:"include_item_usage,omitempty" jsonschema:"items only: keep each item response's own model and usage fields; by default they are dropped and reported once in meta"`
@@ -113,8 +113,8 @@ func registerTools(s *mcp.Server, c *Client) {
 		if in.Items != nil && len(in.Items) == 0 {
 			return nil, errors.New("items must not be empty")
 		}
-		if len(in.Items) > maxItems {
-			return nil, fmt.Errorf("items: %d items exceeds the limit of %d per call; split them across calls", len(in.Items), maxItems)
+		if limit := cmp.Or(c.MaxItems, maxItems); len(in.Items) > limit {
+			return nil, fmt.Errorf("items: %d items exceeds the limit of %d per call; split them across calls", len(in.Items), limit)
 		}
 		if len(in.Questions) == 0 {
 			return nil, errors.New("questions must not be empty")

@@ -21,6 +21,8 @@ type Client struct {
 	HTTP               *http.Client
 	// Backoff is the first retry delay for 429/529; it doubles each attempt.
 	Backoff time.Duration
+	// MaxItems caps items per tool call; zero means maxItems.
+	MaxItems int
 }
 
 // Evaluate posts a System One request and returns the raw response JSON.

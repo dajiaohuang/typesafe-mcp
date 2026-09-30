@@ -85,6 +85,18 @@ TYPESAFE_API_KEY=your-liquid-key TYPESAFE_BASE_URL=https://api.liquid.ai/decisio
 - `TYPESAFE_API_KEY` just selects this route; use your Liquid AI API key as its value, whatever Liquid AI itself calls that key.
 - `TYPESAFE_MODEL` replaces the default `jev-latest`; without it, every call must pass `model: "d1:free"`.
 
+### Capping items per call
+
+`TYPESAFE_MAX_ITEMS` lowers how many items one `evaluate` call accepts. The default and the maximum are both 500; set any whole number from 1 to 500. For example, with `TYPESAFE_MAX_ITEMS=50`, a call with 80 items fails before anything is sent, and a call with 50 items runs as usual.
+
+Why cap it: every item is sent as its own billed request, so one 500-item call costs 500 requests. `evaluate` is marked read-only because it changes nothing, and some MCP hosts run read-only tools without asking you first.
+
+The cap applies on both the TypeSafe and OpenRouter routes. It limits each call, not your total spend: an agent that hits the cap can split the batch across several calls. For a hard ceiling, set a spending limit on your provider account, if the provider offers one.
+
+```sh
+TYPESAFE_API_KEY=your-key TYPESAFE_MAX_ITEMS=50 evaluate setup mcp
+```
+
 ## `evaluate setup mcp`
 
 ```sh
@@ -122,7 +134,7 @@ To use any other MCP client, point it at:
 /absolute/path/to/evaluate mcp
 ```
 
-Put `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in the server's `env`. Add `TYPESAFE_BASE_URL` if you use a custom host, and `TYPESAFE_MODEL` if that host serves a model other than `jev-latest`. For example:
+Put `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in the server's `env`. Add `TYPESAFE_BASE_URL` if you use a custom host, `TYPESAFE_MODEL` if that host serves a model other than `jev-latest`, and `TYPESAFE_MAX_ITEMS` to [cap items per call](#capping-items-per-call). For example:
 
 ```json
 {

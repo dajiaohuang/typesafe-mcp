@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -120,6 +121,16 @@ func newRootCmd() *cobra.Command {
 // only place a *Client is built, so a hand-written client config cannot smuggle
 // a dead endpoint past it either.
 func route() (*Client, error) {
+	// Applies on both routes, since every item is billed either way. It can only
+	// lower maxItems, and caps one call, not total spend.
+	limit := maxItems
+	if s := os.Getenv("TYPESAFE_MAX_ITEMS"); s != "" {
+		n, err := strconv.Atoi(s)
+		if err != nil || n < 1 || n > maxItems {
+			return nil, fmt.Errorf("TYPESAFE_MAX_ITEMS must be an integer from 1 to %d, got %q", maxItems, s)
+		}
+		limit = n
+	}
 	switch {
 	case os.Getenv("TYPESAFE_API_KEY") != "":
 		base := cmp.Or(os.Getenv("TYPESAFE_BASE_URL"), "https://api.typesafe.ai")
@@ -133,15 +144,17 @@ func route() (*Client, error) {
 			return nil, fmt.Errorf("TYPESAFE_BASE_URL must be an absolute http(s) URL, got %q", base)
 		}
 		return &Client{
-			URL:    u.JoinPath("v1", "systemone").String(),
-			APIKey: os.Getenv("TYPESAFE_API_KEY"),
-			Model:  cmp.Or(os.Getenv("TYPESAFE_MODEL"), "jev-latest"),
+			URL:      u.JoinPath("v1", "systemone").String(),
+			APIKey:   os.Getenv("TYPESAFE_API_KEY"),
+			Model:    cmp.Or(os.Getenv("TYPESAFE_MODEL"), "jev-latest"),
+			MaxItems: limit,
 		}, nil
 	case os.Getenv("OPENROUTER_API_KEY") != "":
 		return &Client{
-			URL:    "https://openrouter.ai/api/alpha/decisions",
-			APIKey: os.Getenv("OPENROUTER_API_KEY"),
-			Model:  "~typesafe/jev-latest",
+			URL:      "https://openrouter.ai/api/alpha/decisions",
+			APIKey:   os.Getenv("OPENROUTER_API_KEY"),
+			Model:    "~typesafe/jev-latest",
+			MaxItems: limit,
 		}, nil
 	}
 	return nil, errors.New("set TYPESAFE_API_KEY (https://console.typesafe.ai/) or OPENROUTER_API_KEY (https://openrouter.ai/keys)")
