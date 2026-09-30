@@ -85,7 +85,6 @@ TYPESAFE_API_KEY=your-liquid-key TYPESAFE_BASE_URL=https://api.liquid.ai/decisio
 
 - `TYPESAFE_API_KEY` just selects this route; use your Liquid AI API key as its value, whatever Liquid AI itself calls that key.
 - `TYPESAFE_MODEL` replaces the default `jev-latest`; without it, every call must pass `model: "d1:free"`.
-- As with CLM, the tool's guidance is written for Jev and may not describe d1's behavior exactly.
 
 ## `evaluate setup mcp`
 
