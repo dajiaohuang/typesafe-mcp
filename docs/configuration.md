@@ -7,7 +7,7 @@ How to install `evaluate`, choose an API route, and connect it to your agents.
 The install script supports macOS and Linux on amd64 and arm64. It checks the release archive against its published SHA-256 checksum before installing:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/itsmostafa/typesafe-mcp/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/itsmostafa/system-one-connector/main/install.sh | sh
 ```
 
 It installs to `~/.local/bin`, or to `EVALUATE_INSTALL_DIR` if that is set. If the directory is not on your `PATH`, add it:
@@ -19,16 +19,16 @@ export PATH="$HOME/.local/bin:$PATH"
 With Go installed, you can build from source instead:
 
 ```sh
-go install github.com/itsmostafa/typesafe-mcp/cmd/evaluate@latest
+go install github.com/itsmostafa/system-one-connector/cmd/evaluate@latest
 ```
 
-To upgrade, run `evaluate update`. It replaces the binary in place with the latest GitHub release, after verifying its checksum.
+To upgrade, run `evaluate update`. It replaces the binary in place with the latest GitHub release, after verifying its checksum. When a newer release is out, the server tells your agent at startup, so it can remind you. Restart Claude Desktop, or start a new Codex session, to load the new binary.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `evaluate setup mcp` | Registers the server with Claude Code, Claude Desktop and Codex |
+| `evaluate setup mcp` | Registers the server with Claude Code, Claude Desktop, Codex and Hermes |
 | `evaluate setup pi` | Installs the `evaluate` extension for pi |
 | `evaluate mcp` | Runs the MCP server over stdio (clients start this for you) |
 | `evaluate update` | Updates to the latest release |
@@ -40,7 +40,7 @@ To upgrade, run `evaluate update`. It replaces the binary in place with the late
 
 | Variable | Route | Default model |
 |---|---|---|
-| `TYPESAFE_API_KEY` | TypeSafe API, `POST {TYPESAFE_BASE_URL}/v1/systemone` | `jev-latest` |
+| `TYPESAFE_API_KEY` | TypeSafe API, `POST {TYPESAFE_BASE_URL}/v1/systemone` | `jev-latest`, or `TYPESAFE_MODEL` if set |
 | `OPENROUTER_API_KEY` | OpenRouter Decisions endpoint, billed to your OpenRouter account | `~typesafe/jev-latest` |
 
 Get a TypeSafe key at https://console.typesafe.ai/. The model page on OpenRouter is https://openrouter.ai/~typesafe/jev-latest.
@@ -61,6 +61,41 @@ TYPESAFE_API_KEY=your-key TYPESAFE_BASE_URL=https://jev.internal evaluate setup 
 - Set only the host: `evaluate` appends `/v1/systemone`. A trailing slash is fine.
 - The value must be an absolute `http` or `https` URL. `evaluate setup` rejects anything else rather than writing a broken endpoint into your client configs.
 - It has no effect on the OpenRouter route.
+- It also works with a local server that implements `POST /v1/systemone`, such as one serving Laya. `TYPESAFE_API_KEY` must still be set, since it is what selects this route. Use whatever key your server expects; if it doesn't check keys, any non-empty value such as `local` works.
+
+### Running CLM locally
+
+[CLM-v0.1-8B](https://huggingface.co/Contrastive-LM/CLM-v0.1-8B) is an open System One model whose `clm-serve` implements `POST /v1/systemone`, so it works through the custom host route. Start its servers as described in the [CLM README](https://github.com/Contrastive-LM/CLM#quickstart) (it needs a GPU), then register `evaluate` with the CLM model as the default:
+
+```sh
+TYPESAFE_API_KEY=local TYPESAFE_BASE_URL=http://127.0.0.1:8700 TYPESAFE_MODEL=clm-latest evaluate setup mcp
+```
+
+- `TYPESAFE_MODEL` replaces the default `jev-latest` on the TypeSafe route. CLM rejects unknown model names, so without it every call must pass `model: "clm-latest"`. It has no effect on the OpenRouter route, and a `model` passed in a tool call still wins.
+- Use the real key instead of `local` if you started `clm-serve` with `CLM_API_KEY`.
+
+### d1 (Liquid AI)
+
+[Liquid AI](https://liquid.ai) hosts d1, a System One model, at `https://api.liquid.ai/decisions/v1/systemone`. Since that already ends in `/v1/systemone`, it works through the same custom host route as a self-run server — just point `TYPESAFE_BASE_URL` at Liquid AI's host instead of `127.0.0.1`:
+
+```sh
+TYPESAFE_API_KEY=your-liquid-key TYPESAFE_BASE_URL=https://api.liquid.ai/decisions TYPESAFE_MODEL=d1:free evaluate setup mcp
+```
+
+- `TYPESAFE_API_KEY` just selects this route; use your Liquid AI API key as its value, whatever Liquid AI itself calls that key.
+- `TYPESAFE_MODEL` replaces the default `jev-latest`; without it, every call must pass `model: "d1:free"`.
+
+### Capping items per call
+
+`TYPESAFE_MAX_ITEMS` lowers how many items one `evaluate` call accepts. The default and the maximum are both 500; set any whole number from 1 to 500. For example, with `TYPESAFE_MAX_ITEMS=50`, a call with 80 items fails before anything is sent, and a call with 50 items runs as usual.
+
+Why cap it: every item is sent as its own billed request, so one 500-item call costs 500 requests. `evaluate` is marked read-only because it changes nothing, and some MCP hosts run read-only tools without asking you first.
+
+The cap applies on both the TypeSafe and OpenRouter routes. It limits each call, not your total spend: an agent that hits the cap can split the batch across several calls. For a hard ceiling, set a spending limit on your provider account, if the provider offers one.
+
+```sh
+TYPESAFE_API_KEY=your-key TYPESAFE_MAX_ITEMS=50 evaluate setup mcp
+```
 
 ## `evaluate setup mcp`
 
@@ -72,9 +107,10 @@ This registers the binary as an MCP server named `evaluate` with each client it 
 
 - **Claude Code**, at user scope, when the `claude` CLI is on `PATH`.
 - **Codex**, when the `codex` CLI is on `PATH`.
+- **Hermes**, when the `hermes` CLI is on `PATH`.
 - **Claude Desktop**, when it is installed. Setup edits `claude_desktop_config.json`. Restart Claude Desktop afterwards.
 
-MCP clients start the server without your shell environment. Setup therefore copies every `TYPESAFE_*` variable in your shell, plus `OPENROUTER_API_KEY`, into each client's config. After you change a key or add a variable, run setup again.
+MCP clients start the server without your shell environment. Setup therefore copies every `TYPESAFE_*` variable in your shell, plus `OPENROUTER_API_KEY`, into each client's config. After you change a key or add a variable, run setup again. Running it again replaces the existing `evaluate` entry in each client, so anything you changed on that entry (a Hermes tool selection, say) is reset.
 
 A client that setup does not find is skipped with a message. You can configure it by hand (see below).
 
@@ -98,7 +134,7 @@ To use any other MCP client, point it at:
 /absolute/path/to/evaluate mcp
 ```
 
-Put `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in the server's `env`. Add `TYPESAFE_BASE_URL` if you use a custom host. For example:
+Put `TYPESAFE_API_KEY` or `OPENROUTER_API_KEY` in the server's `env`. Add `TYPESAFE_BASE_URL` if you use a custom host, `TYPESAFE_MODEL` if that host serves a model other than `jev-latest`, and `TYPESAFE_MAX_ITEMS` to [cap items per call](#capping-items-per-call). For example:
 
 ```json
 {

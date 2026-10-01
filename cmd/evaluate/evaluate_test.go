@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net/http"
 	"net/http/httptest"
 
@@ -121,6 +122,7 @@ func TestRoute(t *testing.T) {
 		t.Setenv("TYPESAFE_API_KEY", tc.typesafe)
 		t.Setenv("OPENROUTER_API_KEY", tc.openrouter)
 		t.Setenv("TYPESAFE_BASE_URL", tc.base)
+		t.Setenv("TYPESAFE_MODEL", "")
 		c, err := route()
 		if err != nil {
 			t.Errorf("%+v: %v", tc, err)
@@ -132,6 +134,22 @@ func TestRoute(t *testing.T) {
 		}
 	}
 
+	// TYPESAFE_MODEL replaces the default on the TypeSafe route only, so a local
+	// server that does not know jev-latest can be the default.
+	t.Setenv("TYPESAFE_MODEL", "clm-latest")
+	t.Setenv("TYPESAFE_BASE_URL", "")
+	t.Setenv("OPENROUTER_API_KEY", "")
+	t.Setenv("TYPESAFE_API_KEY", "t")
+	if c, err := route(); err != nil || c.Model != "clm-latest" {
+		t.Errorf("TYPESAFE_MODEL: got %+v, %v", c, err)
+	}
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "o")
+	if c, err := route(); err != nil || c.Model != "~typesafe/jev-latest" {
+		t.Errorf("TYPESAFE_MODEL on OpenRouter: got %+v, %v", c, err)
+	}
+	t.Setenv("TYPESAFE_MODEL", "")
+
 	// A malformed base fails here, before setup bakes it into every client config.
 	t.Setenv("TYPESAFE_API_KEY", "t")
 	t.Setenv("OPENROUTER_API_KEY", "")
@@ -141,6 +159,23 @@ func TestRoute(t *testing.T) {
 			t.Errorf("base %q: want error", base)
 		}
 	}
+
+	// TYPESAFE_MAX_ITEMS lowers the item cap on either route; a bad value fails
+	// here rather than being baked into client configs.
+	t.Setenv("TYPESAFE_BASE_URL", "")
+	t.Setenv("TYPESAFE_API_KEY", "")
+	t.Setenv("OPENROUTER_API_KEY", "o")
+	t.Setenv("TYPESAFE_MAX_ITEMS", "50")
+	if c, err := route(); err != nil || c.MaxItems != 50 {
+		t.Errorf("TYPESAFE_MAX_ITEMS=50: got %+v, %v", c, err)
+	}
+	for _, v := range []string{"0", fmt.Sprint(maxItems + 1), "ten"} {
+		t.Setenv("TYPESAFE_MAX_ITEMS", v)
+		if _, err := route(); err == nil {
+			t.Errorf("TYPESAFE_MAX_ITEMS=%q: want error", v)
+		}
+	}
+	t.Setenv("TYPESAFE_MAX_ITEMS", "")
 
 	// No keys at all: route fails before it ever looks at the base.
 	t.Setenv("TYPESAFE_API_KEY", "")
@@ -168,10 +203,34 @@ func TestSetupCommands(t *testing.T) {
 		{"mcp", "add", "evaluate", "-s", "user", "-e", "TYPESAFE_API_KEY=k", "-e", "OPENROUTER_API_KEY=o", "--", "/bin/evaluate", "mcp"},
 		nil,
 		{"mcp", "add", "evaluate", "--env", "TYPESAFE_API_KEY=k", "--env", "OPENROUTER_API_KEY=o", "--", "/bin/evaluate", "mcp"},
+		nil,
+		{"mcp", "add", "evaluate", "--env", "TYPESAFE_API_KEY=k", "OPENROUTER_API_KEY=o", "--command", "/bin/evaluate", "--args", "mcp"},
 	}
-	got := [][]string{cmds[0].reset, cmds[0].add, cmds[1].reset, cmds[1].add}
+	got := [][]string{cmds[0].reset, cmds[0].add, cmds[1].reset, cmds[1].add, cmds[2].reset, cmds[2].add}
 	if !slices.EqualFunc(got, want, slices.Equal) {
 		t.Fatalf("got %q\nwant %q", got, want)
+	}
+}
+
+func TestSetupHermesAnswers(t *testing.T) {
+	var hermes setupCommand
+	for _, c := range setupCommands("/bin/evaluate", nil) {
+		if c.cli == "hermes" {
+			hermes = c
+		}
+	}
+	if hermes.answers != "Y\nY\n" || hermes.confirm == "" {
+		t.Fatalf("hermes answers = %q, confirm = %q", hermes.answers, hermes.confirm)
+	}
+
+	// `cat` echoes what run pipes to stdin, standing in for the CLI's output.
+	echo := setupCommand{cli: "cat", answers: "saved (1/1 tools enabled)\n", confirm: "tools enabled)"}
+	if out, err := echo.install(context.Background()); err != nil || string(out) != echo.answers {
+		t.Fatalf("install = %q, %v; want stdin echoed, nil", out, err)
+	}
+	echo.answers = "Saved 'evaluate' to config (disabled)\n"
+	if _, err := echo.install(context.Background()); err == nil {
+		t.Fatal("install accepted output without the confirmation")
 	}
 }
 
@@ -318,48 +377,39 @@ func TestPiDir(t *testing.T) {
 func TestValidate(t *testing.T) {
 	obj := map[string]any{"0": "low", "1": "high"}
 	arr := []any{"low", "high"}
-	maxLevels := make([]any, maxScoreLevels)
-	tooManyLevels := make([]any, maxScoreLevels+1)
+	tooManyLevels := make([]any, 11)
 	for i := range tooManyLevels {
 		tooManyLevels[i] = fmt.Sprintf("level %d", i)
-		if i < len(maxLevels) {
-			maxLevels[i] = tooManyLevels[i]
-		}
 	}
-	maxOptions := make(map[string]any, maxChoiceOptions)
-	tooManyOptions := make(map[string]any, maxChoiceOptions+1)
-	for i := 0; i <= maxChoiceOptions; i++ {
+	tooManyOptions := make(map[string]any, 256)
+	for i := 0; i < 256; i++ {
 		option := fmt.Sprintf("option %d", i)
 		tooManyOptions[option] = "description"
-		if i < maxChoiceOptions {
-			maxOptions[option] = "description"
-		}
 	}
 	for _, tc := range []struct {
 		name string
 		q    question
 		want string
 	}{
-		{"score object", question{Type: "score", Criteria: obj}, `questions["q"].criteria: score criteria must be an array of 1 to 10 level descriptions, ordered low to high, got an object`},
+		{"score object", question{Type: "score", Criteria: obj}, `questions["q"].criteria: score criteria must be an array of level descriptions, ordered low to high, got an object`},
 		{"score missing", question{Type: "score"}, "got nothing"},
 		{"score string", question{Type: "score", Criteria: "high"}, "got a string"},
-		{"choice array", question{Type: "choice", Criteria: arr}, `questions["q"].criteria: choice criteria must be an object mapping 1 to 255 options to a description or null, got an array`},
+		{"choice array", question{Type: "choice", Criteria: arr}, `questions["q"].criteria: choice criteria must be an object mapping each option to a description or null, got an array`},
 		{"noul array", question{Type: "noul", Criteria: arr}, `questions["q"].criteria: noul criteria must be an object`},
 
 		{"score array", question{Type: "score", Criteria: arr}, ""},
 		// One level is accepted by the API, so it must not be rejected here.
 		{"score one level", question{Type: "score", Criteria: []any{"only"}}, ""},
-		{"score at limit", question{Type: "score", Criteria: maxLevels}, ""},
-		{"score over limit", question{Type: "score", Criteria: tooManyLevels}, fmt.Sprintf(`score criteria has %d levels; maximum is %d`, maxScoreLevels+1, maxScoreLevels)},
+		{"score large array", question{Type: "score", Criteria: tooManyLevels}, ""},
 		{"choice object", question{Type: "choice", Criteria: obj}, ""},
-		{"choice at limit", question{Type: "choice", Criteria: maxOptions}, ""},
-		{"choice over limit", question{Type: "choice", Criteria: tooManyOptions}, fmt.Sprintf(`choice criteria has %d options; maximum is %d`, maxChoiceOptions+1, maxChoiceOptions)},
+		{"choice large object", question{Type: "choice", Criteria: tooManyOptions}, ""},
 		{"noul true/false", question{Type: "noul", Criteria: map[string]any{"true": "y", "false": "n"}}, ""},
 		{"noul omitted", question{Type: "noul"}, ""},
 		// The API silently drops these keys, so the criteria would do nothing.
 		{"noul yes/no", question{Type: "noul", Criteria: map[string]any{"yes": "y"}}, `noul criteria keys must be "true" or "false", got "yes"`},
 		// The API answers these with a bare "Invalid request.".
 		{"unknown type", question{Type: "yesno"}, `questions["q"].type: must be noul, choice, or score, got "yesno"`},
+		{"bool type", question{Type: "bool"}, `got "bool"; use "noul" for yes/no questions`},
 	} {
 		tc.q.Instructions = "x"
 		err := validate(evaluateIn{State: "s", Questions: map[string]question{"q": tc.q}})
@@ -418,7 +468,7 @@ func TestValidateBlocksRequest(t *testing.T) {
 	defer srv.Close()
 
 	call := connectEvaluate(t, srv)
-	tooManyLevels := make([]string, maxScoreLevels+1)
+	tooManyLevels := make([]string, 11)
 	for i := range tooManyLevels {
 		tooManyLevels[i] = fmt.Sprintf("level %d", i)
 	}
@@ -426,8 +476,8 @@ func TestValidateBlocksRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tooManyOptions := make(map[string]string, maxChoiceOptions+1)
-	for i := 0; i <= maxChoiceOptions; i++ {
+	tooManyOptions := make(map[string]string, 256)
+	for i := 0; i < 256; i++ {
 		tooManyOptions[fmt.Sprintf("option %d", i)] = "description"
 	}
 	optionsJSON, err := json.Marshal(tooManyOptions)
@@ -445,8 +495,8 @@ func TestValidateBlocksRequest(t *testing.T) {
 		{"score array", `["low","high"]`, "score", "", 1},
 		// The API accepts one level, so this must not be rejected locally.
 		{"score one level", `["only"]`, "score", "", 1},
-		{"score over limit", string(levelsJSON), "score", "maximum is 10", 0},
-		{"choice over limit", string(optionsJSON), "choice", "maximum is 255", 0},
+		{"score server-defined cardinality", string(levelsJSON), "score", "", 1},
+		{"choice server-defined cardinality", string(optionsJSON), "choice", "", 1},
 		{"unknown type", `{"0":"low"}`, "bounding_box", `questions["q"].type`, 0},
 	} {
 		calls = 0
@@ -536,6 +586,18 @@ func TestItems(t *testing.T) {
 		}
 	})
 
+	// The documented result shape carries errors even when nothing failed, so
+	// callers can read it without a presence check.
+	t.Run("errors present on success", func(t *testing.T) {
+		text, isErr := call(`{` + q + `,"items":{"e1":{"subject":"a"},"e2":{"subject":"b"}}}`)
+		if isErr {
+			t.Fatalf("tool error: %s", text)
+		}
+		if !strings.Contains(text, `"errors":{}`) {
+			t.Errorf("want \"errors\":{} in %s", text)
+		}
+	})
+
 	t.Run("no shared state", func(t *testing.T) {
 		clear(states)
 		text, isErr := call(`{` + q + `,"items":{"e1":{"subject":"a"}}}`)
@@ -584,7 +646,7 @@ func TestItems(t *testing.T) {
 	for _, tc := range []struct{ name, args, want string }{
 		{"neither state nor items", `{` + q + `}`, "state or items is required"},
 		{"empty items", `{` + q + `,"items":{}}`, "items must not be empty"},
-		{"too many items", `{` + q + `,"items":{` + tooMany + `}}`, "exceeds the limit of 100"},
+		{"too many items", `{` + q + `,"items":{` + tooMany + `}}`, fmt.Sprintf("exceeds the limit of %d", maxItems)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			text, isErr := call(tc.args)
@@ -625,13 +687,223 @@ func TestItemsAggregateCap(t *testing.T) {
 	}
 }
 
+// The API lists choice probabilities in no fixed order, so the same question
+// over many items came back with its options shuffled. Every result must list
+// them in the order the caller wrote the criteria, and the criteria must reach
+// the API in that order too, not sorted alphabetically.
+func TestProbabilityOrder(t *testing.T) {
+	var (
+		mu     sync.Mutex
+		bodies []string
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		shuffled := func(pairs ...string) string {
+			rand.Shuffle(len(pairs), func(i, j int) { pairs[i], pairs[j] = pairs[j], pairs[i] })
+			return "{" + strings.Join(pairs, ",") + "}"
+		}
+		fmt.Fprintf(w, `{"model":"m","answers":{`+
+			`"c":{"type":"choice","choice":"zeta","confidence":0.4,"probabilities":%s},`+
+			`"s":{"type":"score","score":1.1,"confidence":0.6,"legend":%s,"probabilities":%s}},`+
+			`"usage":{"input_tokens":1,"output_tokens":1}}`,
+			shuffled(`"zeta":0.6`, `"alpha":0.3`, `"mid":0.1`),
+			shuffled(`"2":"high"`, `"0":"a < b"`, `"1":"mid"`, `"10":"top"`),
+			shuffled(`"2":0.2`, `"0":0.1`, `"1":0.6`, `"10":0.1`))
+	}))
+	defer srv.Close()
+
+	items := make([]string, 25)
+	for i := range items {
+		items[i] = fmt.Sprintf(`"i%d":{"n":%d}`, i, i)
+	}
+	text, isErr := connectEvaluate(t, srv)(`{"questions":{` +
+		`"c":{"type":"choice","instructions":"i","criteria":{"zeta":null,"alpha":"a","mid":null}},` +
+		`"s":{"type":"score","instructions":"i","criteria":["low","mid","high"]}},` +
+		`"items":{` + strings.Join(items, ",") + `}}`)
+	if isErr {
+		t.Fatalf("tool error: %s", text)
+	}
+	var out struct{ Results map[string]json.RawMessage }
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Results) != 25 {
+		t.Fatalf("%d results, want 25", len(out.Results))
+	}
+	for id, r := range out.Results {
+		var res struct {
+			Answers map[string]map[string]json.RawMessage
+		}
+		if err := json.Unmarshal(r, &res); err != nil {
+			t.Fatal(err)
+		}
+		for _, tc := range []struct {
+			q, field string
+			want     []string
+		}{
+			{"c", "probabilities", []string{"zeta", "alpha", "mid"}},
+			{"s", "probabilities", []string{"0", "1", "2", "10"}},
+			{"s", "legend", []string{"0", "1", "2", "10"}},
+		} {
+			if got := keyOrder(res.Answers[tc.q][tc.field]); !slices.Equal(got, tc.want) {
+				t.Errorf("%s: %s.%s keys = %v, want %v", id, tc.q, tc.field, got, tc.want)
+			}
+		}
+		if !strings.Contains(string(r), `"a < b"`) {
+			t.Errorf("%s: legend text re-escaped: %s", id, r)
+		}
+	}
+	for _, b := range bodies {
+		if !strings.Contains(b, `"criteria":{"zeta":null,"alpha":"a","mid":null}`) {
+			t.Fatalf("criteria not forwarded in caller order: %s", b)
+		}
+	}
+}
+
+// Model and usage are the same on every item, so items mode reports them once
+// in meta and strips them per item unless the caller opts back in.
+func TestItemsMeta(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"model":"jev-x","answers":{"q":{"type":"noul","noul":0.9}},"usage":{"input_tokens":10,"output_tokens":2}}`))
+	}))
+	defer srv.Close()
+	call := connectEvaluate(t, srv)
+	args := `{"questions":{"q":{"type":"noul","instructions":"i"}},"items":{"a":{},"b":{},"c":{}}`
+	for _, keep := range []bool{false, true} {
+		extra := ""
+		if keep {
+			extra = `,"include_item_usage":true`
+		}
+		text, isErr := call(args + extra + `}`)
+		if isErr {
+			t.Fatalf("tool error: %s", text)
+		}
+		var out struct {
+			Results map[string]map[string]json.RawMessage
+			Meta    map[string]any
+		}
+		if err := json.Unmarshal([]byte(text), &out); err != nil {
+			t.Fatal(err)
+		}
+		m := out.Meta
+		if m["model"] != "jev-x" || m["input_tokens"] != 30.0 || m["output_tokens"] != 6.0 || m["item_count"] != 3.0 {
+			t.Errorf("keep=%v: meta = %v", keep, m)
+		}
+		if _, ok := m["latency_ms"].(float64); !ok {
+			t.Errorf("keep=%v: latency_ms missing: %v", keep, m)
+		}
+		for id, r := range out.Results {
+			_, hasUsage := r["usage"]
+			_, hasModel := r["model"]
+			if hasUsage != keep || hasModel != keep || r["answers"] == nil {
+				t.Errorf("keep=%v: results[%s] = %v", keep, id, r)
+			}
+		}
+	}
+}
+
+// min_confidence is applied here, never sent upstream: below it a choice
+// becomes the abstain sentinel and a noul is flagged, with probabilities kept.
+func TestMinConfidence(t *testing.T) {
+	var body string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		body = string(b)
+		w.Write([]byte(`{"answers":{` +
+			`"lo":{"type":"choice","choice":"a","confidence":0.28,"probabilities":{"a":0.46,"b":0.54}},` +
+			`"hi":{"type":"choice","choice":"a","confidence":0.94,"probabilities":{"a":0.97,"b":0.03}},` +
+			`"n":{"type":"noul","noul":0.6},` +
+			`"plain":{"type":"choice","choice":"a","confidence":0.1,"probabilities":{"a":0.55,"b":0.45}}}}`))
+	}))
+	defer srv.Close()
+	call := connectEvaluate(t, srv)
+	choice := func(min string) string {
+		return `{"type":"choice","instructions":"i","criteria":{"a":null,"b":null}` + min + `}`
+	}
+	text, isErr := call(`{"state":"s","questions":{` +
+		`"lo":` + choice(`,"min_confidence":0.5`) + `,"hi":` + choice(`,"min_confidence":0.5`) +
+		`,"n":{"type":"noul","instructions":"i","min_confidence":0.3},"plain":` + choice("") + `}}`)
+	if isErr {
+		t.Fatalf("tool error: %s", text)
+	}
+	if strings.Contains(body, "min_confidence") {
+		t.Errorf("min_confidence forwarded upstream: %s", body)
+	}
+	var out struct{ Answers map[string]map[string]any }
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	a := out.Answers
+	if a["lo"]["choice"] != "__uncertain__" || a["lo"]["uncertain"] != true || a["lo"]["probabilities"] == nil {
+		t.Errorf("lo = %v, want abstention with probabilities", a["lo"])
+	}
+	// |2*0.6-1| = 0.2 < 0.3
+	if a["n"]["uncertain"] != true || a["n"]["noul"] != 0.6 {
+		t.Errorf("n = %v, want flagged with noul kept", a["n"])
+	}
+	for _, id := range []string{"hi", "plain"} {
+		if a[id]["choice"] != "a" || a[id]["uncertain"] != nil {
+			t.Errorf("%s = %v, want untouched", id, a[id])
+		}
+	}
+
+	for _, tc := range []struct{ q, want string }{
+		{`{"type":"score","instructions":"i","criteria":["x","y"],"min_confidence":0.5}`, "only noul and choice"},
+		{choice(`,"min_confidence":1.5`), "between 0 and 1"},
+		{`{"type":"choice","instructions":"i","criteria":{"__uncertain__":null},"min_confidence":0.5}`, "reserved"},
+	} {
+		if text, isErr := call(`{"state":"s","questions":{"q":` + tc.q + `}}`); !isErr || !strings.Contains(text, tc.want) {
+			t.Errorf("IsError=%v, text=%q, want %q", isErr, text, tc.want)
+		}
+	}
+}
+
+// A full batch fans out and comes back as one response.
+func TestItemsAtLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write([]byte(`{"answers":{"q":{"type":"noul","noul":0.9}}}`))
+	}))
+	defer srv.Close()
+	ids := make([]string, maxItems)
+	for i := range ids {
+		ids[i] = fmt.Sprintf(`"e%d":{}`, i)
+	}
+	text, isErr := connectEvaluate(t, srv)(`{"questions":{"q":{"type":"noul","instructions":"i"}},"items":{` + strings.Join(ids, ",") + `}}`)
+	var out struct{ Results map[string]json.RawMessage }
+	if isErr || json.Unmarshal([]byte(text), &out) != nil || len(out.Results) != maxItems {
+		t.Fatalf("IsError=%v, %d results, want %d: %.200s", isErr, len(out.Results), maxItems, text)
+	}
+}
+
+// A configured cap rejects the batch before any request goes out.
+func TestItemsConfiguredLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("request sent past the cap")
+	}))
+	defer srv.Close()
+	call := connectClient(t, &Client{URL: srv.URL, HTTP: srv.Client(), MaxItems: 2})
+	text, isErr := call(`{"questions":{"q":{"type":"noul","instructions":"i"}},"items":{"a":{},"b":{},"c":{}}}`)
+	if !isErr || !strings.Contains(text, "exceeds the limit of 2") {
+		t.Errorf("IsError=%v, text=%q", isErr, text)
+	}
+}
+
 // connectEvaluate registers the evaluate tool against srv and connects an MCP
 // client to it in memory, returning a call that yields the tool's text and
 // whether it was an error result.
 func connectEvaluate(t *testing.T, srv *httptest.Server) func(args string) (string, bool) {
 	t.Helper()
+	return connectClient(t, &Client{URL: srv.URL, APIKey: "k", HTTP: srv.Client(), Model: "m"})
+}
+
+// connectClient is connectEvaluate for a caller-built Client.
+func connectClient(t *testing.T, c *Client) func(args string) (string, bool) {
+	t.Helper()
 	s := mcp.NewServer(&mcp.Implementation{Name: "evaluate", Version: "test"}, nil)
-	registerTools(s, &Client{URL: srv.URL, APIKey: "k", HTTP: srv.Client(), Model: "m"})
+	registerTools(s, c)
 	ct, st := mcp.NewInMemoryTransports()
 	ctx := context.Background()
 	ss, err := s.Connect(ctx, st, nil)
@@ -664,5 +936,34 @@ func TestNonJSONSuccessIsError(t *testing.T) {
 	text, isErr := connectEvaluate(t, srv)(`{"state":"s","questions":{"q":{"type":"noul","instructions":"i"}}}`)
 	if !isErr || !strings.Contains(text, "not valid JSON") {
 		t.Errorf("IsError=%v, text=%q", isErr, text)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestUpdateNotice(t *testing.T) {
+	origClient, origVersion := updateClient, version
+	t.Cleanup(func() { updateClient, version = origClient, origVersion })
+	updateClient = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`{"tag_name":"v9.9.9"}`))}, nil
+	})}
+
+	for _, tc := range []struct{ version, wantSub string }{
+		{"dev", ""},
+		{"v9.9.9", ""},
+		{"v10.0.0", ""},
+		{"v9.9.10-0.20260101000000-abcdef123456", ""},
+		{"v9.9.9+dirty", ""},
+		{"v9.9.9-0.20260101000000-abcdef123456", "evaluate v9.9.9 is available (running v9.9.9-0.20260101000000-abcdef123456)"},
+		{"v9.9.8", "evaluate v9.9.9 is available (running v9.9.8)"},
+		{"v0.1.0", "evaluate v9.9.9 is available (running v0.1.0)"},
+	} {
+		version = tc.version
+		got := updateNotice(context.Background())
+		if (tc.wantSub == "") != (got == "") || !strings.Contains(got, tc.wantSub) {
+			t.Errorf("version %s: updateNotice() = %q, want containing %q", tc.version, got, tc.wantSub)
+		}
 	}
 }
